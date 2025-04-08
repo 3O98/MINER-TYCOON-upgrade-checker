@@ -1,5 +1,4 @@
 import streamlit as st
-import re
 import webbrowser
 
 # Conversion dictionary for game notations to scientific notation
@@ -24,7 +23,6 @@ def convert_game_notation_to_number(value):
     """Convert game notation (like 10NQd) to a float number"""
     if not value:
         return 0.0
-    # Check if the value is already in scientific notation
     if 'e' in value:
         try:
             return float(value)
@@ -37,12 +35,11 @@ def convert_game_notation_to_number(value):
             alpha_part += char
         else:
             num_part += char
-    if not alpha_part:  # No notation, just a regular number
+    if not alpha_part:
         try:
             return float(value)
         except ValueError:
             return 0.0
-    # Handle cases where decimal is omitted (like "10NQd" instead of "10.0NQd")
     if '.' not in num_part and num_part:
         num_part += '.0'
     exponent = NOTATION_CONVERSION.get(alpha_part, 'e0')
@@ -81,177 +78,190 @@ def get_area_specific_advice(area):
         """
     return advice
 
-def calc_efficiency(upgrades, total_resources=None):
-    results = []
-    level_comparisons = []
-    for i, upgrade in enumerate(upgrades, 1):
-        bonus = convert_game_notation_to_number(upgrade['bonus'])
-        cost = convert_game_notation_to_number(upgrade['cost'])
-        eff_cost = convert_game_notation_to_number(upgrade['eff_cost']) if upgrade['eff_upgrade'] else 0
-        
-        if cost == 0:
-            continue
-        
-        normal_efficiency = bonus / cost * 100  # Convert to percentage
-        time_to_buy = "N/A"
-        if total_resources is not None:
-            current_resources = convert_game_notation_to_number(total_resources)
-            if current_resources < cost:
-                time_to_buy = f"{(cost - current_resources):.2e}"
-        results.append((f"Upgrade {i} (Normal)", normal_efficiency, bonus, cost, time_to_buy))
-        
-        # Compare with efficiency upgrade if available
-        if upgrade['eff_upgrade'] and eff_cost != 0:
-            doubled_bonus = bonus * 2
-            eff_efficiency = doubled_bonus / eff_cost * 100  # Convert to percentage
-            results.append((f"Upgrade {i} (Efficiency)", eff_efficiency, doubled_bonus, eff_cost, "N/A"))
+def calc_efficiency():
+    """Calculate and compare upgrade efficiencies."""
+    try:
+        upgrades = []
+        level_comparisons = []
+        selected_area = st.session_state.area_var
+
+        # Collect all regular upgrade data and compare with efficiency upgrades
+        for i in range(1, 6):  # 5 upgrades
+            bonus = st.session_state[f'bonus_{i}']
+            cost = st.session_state[f'cost_{i}']
+            unlocked = st.session_state[f'unlocked_{i}']
+            if not unlocked:
+                continue
+            bonus_num = convert_game_notation_to_number(bonus)
+            cost_num = convert_game_notation_to_number(cost)
+            if cost_num == 0:
+                continue
+            normal_efficiency = bonus_num / cost_num
+            upgrades.append((f"Upgrade {i}", normal_efficiency, bonus_num, cost_num, "Normal"))
             
-            # Level comparison
-            if eff_efficiency > normal_efficiency:
-                diff_percent = ((eff_efficiency - normal_efficiency) / normal_efficiency) * 100
-                comparison = f"Level {i}: 🟢 Efficiency upgrade is {diff_percent:.1f}% better"
-            elif eff_efficiency < normal_efficiency:
-                diff_percent = ((normal_efficiency - eff_efficiency) / eff_efficiency) * 100
-                comparison = f"Level {i}: 🔴 Normal upgrade is {diff_percent:.1f}% better"
-            else:
-                comparison = f"Level {i}: ⚪ Both upgrades are equally efficient"
-            level_comparisons.append(comparison)
+            # Check efficiency upgrade if available
+            if st.session_state[f'eff_upgrade_{i}']:
+                eff_cost = convert_game_notation_to_number(st.session_state[f'eff_cost_{i}'])
+                if eff_cost == 0:
+                    continue
+                doubled_bonus = bonus_num * 2
+                eff_efficiency = doubled_bonus / eff_cost
+                upgrades.append((f"Upgrade {i}", eff_efficiency, doubled_bonus, eff_cost, "Efficiency"))
+                
+                # Compare normal vs efficiency for this level
+                if eff_efficiency > normal_efficiency:
+                    diff_percent = ((eff_efficiency - normal_efficiency) / normal_efficiency) * 100
+                    comparison = f"Level {i}: 🟢 Efficiency upgrade is {diff_percent:.1f}% better"
+                elif eff_efficiency < normal_efficiency:
+                    diff_percent = ((normal_efficiency - eff_efficiency) / eff_efficiency) * 100
+                    comparison = f"Level {i}: 🔴 Normal upgrade is {diff_percent:.1f}% better"
+                else:
+                    comparison = f"Level {i}: ⚪ Both upgrades are equally efficient"
+                level_comparisons.append(comparison)
+
+        # Check if we have any upgrades to compare
+        if not upgrades:
+            st.error("No upgrades selected or all have zero cost!")
+            return
+
+        # Sort all upgrades by efficiency (highest first)
+        upgrades.sort(key=lambda x: -x[1])
+
+        # Prepare results text
+        result_text = f"🔹 UPGRADE COMPARISONS BY LEVEL ({selected_area}) 🔹\n"
+        result_text += "\n".join(level_comparisons) + "\n\n"
+        result_text += "🏆 ALL UPGRADES RANKED BY EFFICIENCY 🏆\n"
+        for i, (name, eff, bonus, cost, upgrade_type) in enumerate(upgrades, 1):
+            medal = ""
+            if i == 1: medal = "🥇 "
+            elif i == 2: medal = "🥈 "
+            elif i == 3: medal = "🥉 "
+            result_text += f"{medal}{name} ({upgrade_type}): {eff:.2e} efficiency\n"
+            result_text += f"   Bonus: {bonus:.2e} | Cost: {cost:.2e}\n"
+        result_text += f"\n✨ OVERALL BEST OPTION ✨\n{upgrades[0][0]} ({upgrades[0][4]}) with efficiency {upgrades[0][1]:.2e}"
+        
+        # Add area-specific advice
+        result_text += "\n\n🎯 AREA-SPECIFIC TIPS:\n" + get_area_specific_advice(selected_area)
+
+        # Display results
+        st.subheader("Results")
+        st.text_area("Upgrade Comparison Results", result_text, height=400)
+        
+        # Add copy button (Streamlit doesn't have direct clipboard access, so we show a message)
+        if st.button("📋 Copy Results (Manually select and copy)"):
+            st.success("Please manually select the text above and copy it (Ctrl+C or Cmd+C)")
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+
+def show_optimization_advice():
+    """Display optimization advice based on user inputs."""
+    try:
+        total_resources = convert_game_notation_to_number(st.session_state.resource_input)
+        fs_bonus = convert_game_notation_to_number(st.session_state.fs_input)
+        gather_percent = convert_game_notation_to_number(st.session_state.gather_input)
+        selected_area = st.session_state.area_var
+
+        advice = f"🎯 OPTIMIZATION ADVICE FOR {selected_area}:\n\n"
+
+        if selected_area == "Early Game (A1-A3)":
+            advice += "- Focus on unlocking perks like Instant Reload.\n"
+            advice += "- Prioritize pet hatching and mutations.\n"
+            advice += "- Farm shards at the Christmas event for quick progress.\n"
+            advice += "- Prestige only when necessary (after tutorial).\n"
+        elif selected_area == "Mid Game (A4)":
+            advice += "- Farm the A4 meteor for shards and eggs.\n"
+            advice += "- Maximize your Prestige upgrades before advancing.\n"
+            advice += "- Hatch and mutate pets before entering A5.\n"
+            advice += "- Balance stone collection with pet upgrades.\n"
+        elif selected_area == "Late Game (A5+)":
+            advice += "- Focus on maxing shard sinks and Prestige Multiplier.\n"
+            advice += "- Join boss or meteor lobbies for maximum rewards.\n"
+            advice += "- Aim for 1b+ Prestige Multiplier before breaking A5 meteor solo.\n"
+            advice += "- Mutate all pets and invest in FS bonuses.\n"
+
+        advice += f"\nYour Current Stats:\n"
+        advice += f"- Total Resources: {total_resources:.2e}\n"
+        advice += f"- Final Strike Bonus: {fs_bonus:.2e}\n"
+        advice += f"- Gather %: {gather_percent:.2e}\n"
+
+        st.subheader("Optimization Advice")
+        st.text_area("Advice", advice, height=300)
+
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+
+# Main Streamlit app
+def main():
+    st.set_page_config(page_title="🎮 Upgrade Efficiency Checker", layout="wide")
     
-    if not results:
-        return "No valid upgrades found!"
+    # Initialize session state variables
+    if 'area_var' not in st.session_state:
+        st.session_state.area_var = "Early Game (A1-A3)"
     
-    # Sort by efficiency
-    results.sort(key=lambda x: -x[1])
+    # Header
+    st.title("🎮 Upgrade Efficiency Checker")
+    st.markdown("Optimize your upgrade path for maximum efficiency!")
     
-    # Prepare results text
-    result_text = "🔹 UPGRADE COMPARISONS BY LEVEL 🔹\n"
-    result_text += "\n".join(level_comparisons) + "\n"
-    result_text += "🏆 ALL UPGRADES RANKED BY EFFICIENCY 🏆\n"
+    # Area selection
+    st.session_state.area_var = st.selectbox(
+        "Select Your Current Area:",
+        ["Early Game (A1-A3)", "Mid Game (A4)", "Late Game (A5+)"],
+        index=0
+    )
     
-    for i, (name, eff, bonus, cost, time_to_buy) in enumerate(results, 1):
-        medal = ""
-        if i == 1: medal = "🥇 "
-        elif i == 2: medal = "🥈 "
-        elif i == 3: medal = "🥉 "
-        result_text += f"{medal}{name}: {eff:.1f}% efficiency\n"
-        result_text += f"   Bonus: {bonus:.2e} | Cost: {cost:.2e}\n"
-        result_text += f"   Time to Buy: {time_to_buy}\n"
+    # Create tabs
+    tab1, tab2, tab3 = st.tabs(["Calculator", "Tips & Tricks", "Optimization"])
     
-    result_text += f"\n✨ OVERALL BEST OPTION ✨\n{results[0][0]} with efficiency {results[0][1]:.1f}%"
-    return result_text
-
-# Streamlit App Layout
-st.set_page_config(page_title="🎮 Upgrade Efficiency Checker", layout="wide")
-st.title("🎮 Upgrade Efficiency Checker")
-st.write("Optimize your upgrade path for maximum efficiency!")
-
-# Sidebar for Help and Settings
-with st.sidebar:
-    st.header("⚙️ Settings & Help")
-    st.markdown("""
-    ### How to Use
-    1. For each upgrade level (1-5):
-       - Enter the **Bonus** and **Cost** values (e.g., `10NQd` or `1.23e150`).
-       - Check the box if an **Efficiency Upgrade** is available and enter its cost.
-    2. Enter your total resources (optional) to calculate time-to-buy estimates.
-    3. Click **Compare Upgrades** to see:
-       - Level-by-level comparisons (which is better).
-       - All upgrades ranked by efficiency.
-       - The absolute best option.
-    4. Copy the results and paste them into Discord.
+    with tab1:
+        st.header("Upgrade Efficiency Calculator")
+        
+        # Input fields for upgrades
+        for i in range(1, 6):
+            with st.expander(f"⚙️ Upgrade Level {i}", expanded=True):
+                cols = st.columns([1, 4, 4, 4])
+                with cols[0]:
+                    st.session_state[f'unlocked_{i}'] = st.checkbox(
+                        "Unlocked", value=True, key=f"unlocked_check_{i}"
+                    )
+                with cols[1]:
+                    st.session_state[f'bonus_{i}'] = st.text_input(
+                        "Bonus Value", key=f"bonus_entry_{i}"
+                    )
+                with cols[2]:
+                    st.session_state[f'cost_{i}'] = st.text_input(
+                        "Cost", key=f"cost_entry_{i}"
+                    )
+                
+                st.caption("Example: 10NQd or 1.23e150")
+                
+                st.session_state[f'eff_upgrade_{i}'] = st.checkbox(
+                    "Efficiency Upgrade Available", key=f"eff_upgrade_check_{i}"
+                )
+                if st.session_state[f'eff_upgrade_{i}']:
+                    st.session_state[f'eff_cost_{i}'] = st.text_input(
+                        "Efficiency Upgrade Cost", key=f"eff_cost_entry_{i}"
+                    )
+        
+        if st.button("🔍 Compare Upgrades", key="calculate_button"):
+            calc_efficiency()
     
-    ### Example Input
-    - **Bonus:** `10NQd`
-    - **Cost:** `70.4Qi`
-    - **Efficiency Cost:** `140.8Qi`
-    - **Total Resources:** `61.3Qi`
+    with tab2:
+        st.header("Tips & Tricks")
+        st.markdown(get_area_specific_advice(st.session_state.area_var))
     
-    ### Tips
-    - You can use shorthand (e.g., `10NQd`) or precise (e.g., `10.03NQd`) values.
-    - Decimal points are optional.
-    """)
-    discord_link = st.text_input("Discord Link", value="https://discord.com", help="Join our Discord for support!")
-    if st.button("💬 Join Discord"):
-        webbrowser.open(discord_link)
-
-# Main Content
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    # Inputs for 5 upgrades
-    upgrades = []
-    for i in range(1, 6):
-        st.subheader(f"⚙️ Upgrade Level {i}")
-        unlocked = st.checkbox(f"Unlocked", key=f"unlocked_{i}", value=True)
-        if unlocked:
-            col1, col2, col3 = st.columns([2, 2, 1])
-            bonus = col1.text_input(f"Bonus Value:", key=f"bonus_{i}", value="10NQd")
-            cost = col2.text_input(f"Cost:", key=f"cost_{i}", value="1Qi")
-            eff_upgrade = col3.checkbox(f"Efficiency Upgrade Available", key=f"eff_upgrade_{i}")
-            eff_cost = ""
-            if eff_upgrade:
-                eff_cost = col2.text_input(f"Efficiency Cost:", key=f"eff_cost_{i}", value="2Qi")
-            upgrades.append({
-                "bonus": bonus,
-                "cost": cost,
-                "eff_upgrade": eff_upgrade,
-                "eff_cost": eff_cost
-            })
-
-    # Total Resources Input
-    total_resources = st.text_input("Enter your total resources (e.g., 61.3Qi)", help="Optional: Enter your saved resources to calculate time-to-buy.")
-
-    # Calculate Button
-    if st.button("🔍 Compare Upgrades"):
-        result_text = calc_efficiency(upgrades, total_resources)
-        st.markdown(result_text)
-
-with col2:
-    st.header("📋 Results Summary")
-    st.info("Results will appear here after processing.")
-    st.markdown("""
-    ### Share Your Results
-    - Copy the results and paste them into Discord.
-    - Use the **💬 Join Discord** button to share feedback or ask questions.
-    """)
-
-# Area Selection Dropdown
-area_var = st.selectbox("Select Your Current Area:", ["Early Game (A1-A3)", "Mid Game (A4)", "Late Game (A5+)"])
-area_advice = get_area_specific_advice(area_var)
-st.markdown("🎯 AREA-SPECIFIC TIPS:")
-st.markdown(area_advice)
-
-# Footer
-st.write("💬 Join Discord for more help!")
-st.write("[Discord Link](https://discord.gg/tcgvB36KDQ)")
-
-# Additional Features
-st.markdown("""
----
-### Additional Features
-- **Time-to-Buy Estimates**: Calculates how long it will take to afford upgrades based on your current resources.
-- **Area-Specific Advice**: Provides tailored tips for Early, Mid, and Late Game.
-- **Copy Results**: Easily copy results to share with your Discord community.
-- **Scientific Notation Support**: Handles shorthand (e.g., `10NQd`) and precise (e.g., `10.03NQd`) inputs.
-""")
-
-# FAQ Section
-with st.expander("❓ Frequently Asked Questions"):
-    st.markdown("""
-    #### Q: What is an Efficiency Upgrade?
-    A: An Efficiency Upgrade doubles the bonus but costs significantly more. This tool helps you decide whether to buy the normal upgrade or the Efficiency Upgrade.
+    with tab3:
+        st.header("Optimization Advice")
+        st.session_state.resource_input = st.text_input("Total Resources:")
+        st.session_state.fs_input = st.text_input("Final Strike Bonus:")
+        st.session_state.gather_input = st.text_input("Gather %:")
+        
+        if st.button("Get Optimization Advice", key="optimization_button"):
+            show_optimization_advice()
     
-    #### Q: How do I use shorthand notations like `10NQd`?
-    A: Simply type the number followed by the shorthand (e.g., `10NQd`). The tool automatically converts it into scientific notation.
-    
-    #### Q: Can I use this tool for any game?
-    A: While it’s optimized for games with similar mechanics, you can adapt it for other games by modifying the conversion dictionary.
-    """)
+    # Footer
+    st.markdown("---")
+    st.markdown("Share your results in Discord!")
 
-# Credits
-st.markdown("""
----
-### Credits
-Developed by ka.i_  
-Special thanks to the Discord community for feedback and support!
-""")
+if __name__ == "__main__":
+    main()
